@@ -4,11 +4,10 @@
 
 ## 前提
 TypeScriptの実行環境としてBun、環境構築にCDKを使って実装を進めていくので事前にライブラリをインストールしておきます。
-またDynamoDBをローカルで起動するためにDocker、Docker Composeも併せてインストールしておきます。使用したバージョンは下記となります。
+またDynamoDBをローカルで起動するためにDockerも併せてインストールしておきます。使用したバージョンは下記となります。
 
 - CDK・・・2.158.0
 - Docker・・・27.1.1-rd
-- Docker Compose・・・v2.29.1
 - Bun・・・1.1.26
 
 ## 準備
@@ -27,9 +26,9 @@ bun install
 ```
 
 ## 起動
-まずdocker-composeコマンドでdynamodb-localを起動します。
+まずdocker composeコマンドでdynamodb-localを起動します。
 ```
-docker-compose up -d
+docker compose up -d
 ```
 その後、サーバを起動します。
 ```
