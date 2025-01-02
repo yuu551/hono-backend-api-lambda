@@ -14,8 +14,6 @@ import { zValidator } from "@hono/zod-validator";
 import { v4 as uuidv4 } from "uuid";
 import { docClient } from "../../dynamoDB/client";
 
-const todos = new Hono();
-
 type ExpressionAttributeValues = { [key: string]: any };
 type ExpressionAttributeNames = { [key: string]: string };
 
@@ -45,127 +43,119 @@ const TodoUpdateSchema = TodoSchema.partial().omit({ userId: true });
 // 現在のUTC時刻を取得する関数
 const getCurrentTimestamp = () => new Date().toISOString();
 
-// Create: 新しいTodoを作成
-todos.post("/", zValidator("json", TodoSchema), async (c) => {
-  const validatedData = c.req.valid("json");
-  const now = getCurrentTimestamp();
-  const params = {
-    TableName: TABLE_NAME,
-    Item: {
-      id: uuidv4(),
-      ...validatedData,
-      createdAt: now,
-      updatedAt: now,
-    },
-  };
+const todos = new Hono()
+  .post("/", zValidator("json", TodoSchema), async (c) => {
+    const validatedData = c.req.valid("json");
+    const now = getCurrentTimestamp();
+    const params = {
+      TableName: TABLE_NAME,
+      Item: {
+        id: uuidv4(),
+        ...validatedData,
+        createdAt: now,
+        updatedAt: now,
+      },
+    };
 
-  try {
-    await docClient.send(new PutCommand(params));
-    return c.json(
-      { message: "Todo created successfully", todo: params.Item },
-      201
-    );
-  } catch (error) {
-    console.log(error);
-    return c.json({ error: "Failed to create todo" }, 500);
-  }
-});
-
-// Read: 特定のユーザーの全てのTodoを取得
-todos.get("/user/:userId", async (c) => {
-  const userId = c.req.param("userId");
-  const params = {
-    TableName: TABLE_NAME,
-    IndexName: USER_ID_INDEX,
-    KeyConditionExpression: "userId = :userId",
-    ExpressionAttributeValues: {
-      ":userId": userId,
-    },
-  };
-
-  try {
-    const data = await docClient.send(new QueryCommand(params));
-    return c.json(data.Items);
-  } catch (error) {
-    console.log(error);
-    return c.json({ error: "Failed to retrieve todos" }, 500);
-  }
-});
-
-// Read: 特定のTodoを取得
-todos.get("/:id", async (c) => {
-  const id = c.req.param("id");
-  const params = {
-    TableName: TABLE_NAME,
-    Key: { id },
-  };
-
-  try {
-    const data = await docClient.send(new GetCommand(params));
-    if (data.Item) {
-      return c.json(data.Item);
-    } else {
-      return c.json({ error: "Todo not found" }, 404);
+    try {
+      await docClient.send(new PutCommand(params));
+      return c.json(
+        { message: "Todo created successfully", todo: params.Item },
+        201
+      );
+    } catch (error) {
+      console.log(error);
+      return c.json({ error: "Failed to create todo" }, 500);
     }
-  } catch (error) {
-    console.log(error);
-    return c.json({ error: "Failed to retrieve todo" }, 500);
-  }
-});
+  })
+  .get("/user/:userId", async (c) => {
+    const userId = c.req.param("userId");
+    const params = {
+      TableName: TABLE_NAME,
+      IndexName: USER_ID_INDEX,
+      KeyConditionExpression: "userId = :userId",
+      ExpressionAttributeValues: {
+        ":userId": userId,
+      },
+    };
 
-// Update: Todoを更新
-todos.put("/:id", zValidator("json", TodoUpdateSchema), async (c) => {
-  const id = c.req.param("id");
-  const validatedData = c.req.valid("json");
+    try {
+      const data = await docClient.send(new QueryCommand(params));
+      return c.json(data.Items);
+    } catch (error) {
+      console.log(error);
+      return c.json({ error: "Failed to retrieve todos" }, 500);
+    }
+  })
+  .get("/:id", async (c) => {
+    const id = c.req.param("id");
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id },
+    };
 
-  const updateExpressions: string[] = [];
-  const expressionAttributeValues: ExpressionAttributeValues = {};
-  const expressionAttributeNames: ExpressionAttributeNames = {};
+    try {
+      const data = await docClient.send(new GetCommand(params));
+      if (data.Item) {
+        return c.json(data.Item);
+      } else {
+        return c.json({ error: "Todo not found" }, 404);
+      }
+    } catch (error) {
+      console.log(error);
+      return c.json({ error: "Failed to retrieve todo" }, 500);
+    }
+  })
+  .put("/:id", zValidator("json", TodoUpdateSchema), async (c) => {
+    const id = c.req.param("id");
+    const validatedData = c.req.valid("json");
 
-  Object.entries(validatedData).forEach(([key, value]) => {
-    updateExpressions.push(`#${key} = :${key}`);
-    expressionAttributeValues[`:${key}`] = value;
-    expressionAttributeNames[`#${key}`] = key;
+    const updateExpressions: string[] = [];
+    const expressionAttributeValues: ExpressionAttributeValues = {};
+    const expressionAttributeNames: ExpressionAttributeNames = {};
+
+    Object.entries(validatedData).forEach(([key, value]) => {
+      updateExpressions.push(`#${key} = :${key}`);
+      expressionAttributeValues[`:${key}`] = value;
+      expressionAttributeNames[`#${key}`] = key;
+    });
+
+    // 更新日時を追加
+    updateExpressions.push("#updatedAt = :updatedAt");
+    expressionAttributeValues[":updatedAt"] = getCurrentTimestamp();
+    expressionAttributeNames["#updatedAt"] = "updatedAt";
+
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id },
+      UpdateExpression: `set ${updateExpressions.join(", ")}`,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ReturnValues: ReturnValue.ALL_NEW,
+    };
+
+    try {
+      const data = await docClient.send(new UpdateCommand(params));
+      return c.json(data.Attributes);
+    } catch (error) {
+      console.log(error);
+      return c.json({ error: "Failed to update todo" }, 500);
+    }
+  })
+  .delete("/:id", async (c) => {
+    const id = c.req.param("id");
+    const params = {
+      TableName: TABLE_NAME,
+      Key: { id },
+    };
+
+    try {
+      await docClient.send(new DeleteCommand(params));
+      return c.json({ message: "Todo deleted successfully" });
+    } catch (error) {
+      console.log(error);
+      return c.json({ error: "Failed to delete todo" }, 500);
+    }
   });
-
-  // 更新日時を追加
-  updateExpressions.push("#updatedAt = :updatedAt");
-  expressionAttributeValues[":updatedAt"] = getCurrentTimestamp();
-  expressionAttributeNames["#updatedAt"] = "updatedAt";
-
-  const params = {
-    TableName: TABLE_NAME,
-    Key: { id },
-    UpdateExpression: `set ${updateExpressions.join(", ")}`,
-    ExpressionAttributeValues: expressionAttributeValues,
-    ExpressionAttributeNames: expressionAttributeNames,
-    ReturnValues: ReturnValue.ALL_NEW,
-  };
-
-  try {
-    const data = await docClient.send(new UpdateCommand(params));
-    return c.json(data.Attributes);
-  } catch (error) {
-    console.log(error);
-    return c.json({ error: "Failed to update todo" }, 500);
-  }
-});
-
-// Delete: Todoを削除
-todos.delete("/:id", async (c) => {
-  const id = c.req.param("id");
-  const params = {
-    TableName: TABLE_NAME,
-    Key: { id },
-  };
-
-  try {
-    await docClient.send(new DeleteCommand(params));
-    return c.json({ message: "Todo deleted successfully" });
-  } catch (error) {
-    console.log(error);
-    return c.json({ error: "Failed to delete todo" }, 500);
-  }
-});
 
 export { todos };
